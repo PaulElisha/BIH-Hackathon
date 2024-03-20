@@ -9,13 +9,14 @@ pragma solidity 0.8.22;
 @notice: This project is a platform that allows anyone to raise funds through crowd-vesting. 
 @dev: implements */
 
+import "@chainlink/contracts/src/v0.8/interfaces/KeeperCompatibleInterface.sol";
 
-contract GetFunded {
+contract GetFunded is KeeperCompatibleInterface {
    
      address private immutable i_owner;
      uint256 public s_totalFunded;
      address[] private s_verifiers;
-     uint256 s_burnFee;
+     uint256 immutable i_burnFee;
 
      struct User {
           address uAddress;
@@ -73,7 +74,7 @@ contract GetFunded {
           Canceled
      }
 
-     ProjectState private s_status;
+     ProjectState private s_state;
 
      mapping (address => User) private s_user;
      mapping (uint256 => Project) private s_project;
@@ -141,7 +142,7 @@ contract GetFunded {
 
      modifier onlyUser() {
           if (
-               msg.sender != s_user[msg.sender].uAddress
+               s_user[msg.sender].uAddress != msg.sender
           ) revert InvalidUser();
           if (
                msg.sender == address(0)
@@ -210,7 +211,7 @@ contract GetFunded {
           User storage user = s_user[msg.sender];
 
           if (
-               msg.sender == s_user[msg.sender].uAddress
+               s_user[msg.sender].uAddress == msg.sender
           ) revert AlreadyRegistered();
 
           user.uAddress = msg.sender;
@@ -260,7 +261,7 @@ contract GetFunded {
 
           s_status = ProjectState.Pending;
 
-          activeProject[project.id] = false;
+          activeProject[project.id] = true;
 
           s_projects.push(project);
 
@@ -352,7 +353,7 @@ contract GetFunded {
           require(sent);
      }
 
-     function _getFundedProjects() internal view returns (uint256 id) {
+     function _getFundedProjects() internal view returns (uint256 id, bytes data) {
           for(uint256 i = 0; i < s_projects.length; i++) {
                Project storage project = s_projects[i];
                if(
@@ -366,51 +367,50 @@ contract GetFunded {
           return id;
      }
 
-    //  function checkUpkeep(
-    //       bytes memory /* checkData*/
-    //  ) public override returns(bool upkeepNeeded, bytes memory /* performData */) {
-    //       uint256 id = _getFundedProjects();
-    //       Project storage project = s_project[id];
-    //       bool isCreated = ProjectState.Created == s_status;
-    //       bool isVerified = ProjectState.Verified == s_status;
-    //       bool hasInvestors = (project.investors.length > 0);
-    //       bool goalReached = (project.amountFunded == project.fundingAmount);
-    //       bool funded = project.isFunded;
-    //       upkeepNeeded = (
-    //            isCreated && 
-    //            isVerified && 
-    //            goalReached && 
-    //            hasInvestors
-    //       ); 
-    //  }    
+     function checkUpkeep(
+          bytes memory /* checkData*/
+     ) public override returns(bool upkeepNeeded, bytes memory /* performData */) {
+          (id, )= _getFundedProjects();
+          Project storage project = s_project[id];
+          bool isCreated = ProjectState.Created == s_status;
+          bool isVerified = ProjectState.Verified == s_status;
+          bool hasInvestors = (project.investors.length > 0);
+          bool goalReached = (project.amountFunded == project.fundingAmount);
+          bool funded = project.isFunded;
+          upkeepNeeded = (
+               isCreated && 
+               isVerified && 
+               goalReached && 
+               hasInvestors
+          ); 
+     }    
 
      /// Pay Project Creators
-    //  function performUpkeep(
-    //       bytes calldata /* performData */
-    //  ) external override {
-    //       (bool upkeepNeeded, ) = checkUpkeep("");
+     function performUpkeep(
+          bytes calldata /* performData */
+     ) external override {
+          (bool upkeepNeeded, ) = checkUpkeep("");
 
-    //       if(!upkeepNeeded) revert UpkeepNeeded();
+          if(!upkeepNeeded) revert UpkeepNeeded();
           
-    //       uint256 id = _getFundedProjects();
+          (id, )= _getFundedProjects();
 
-    //       Project storage project = s_project[id];
+          Project storage project = s_project[id];
 
-    //       if(!project.isActive[id]) return NotActive();
-    //       if(
-    //            project.fundingBalance == 0
-    //       ) {
-    //            address owner = project.owner;
-    //            uint256 bal = project.amountFunded;
-    //            bal = 0;
-    //            (bool success,) = payable(owner).call{value: bal}("");
-    //            project.isActive[id] = false;
-    //            require(success);
-    //       }
-    //  }
+          if(!project.isActive[id]) return NotActive();
+          if(
+               project.fundingBalance == 0
+          ) {
+               address owner = project.owner;
+               uint256 bal = project.amountFunded;
+               bal = 0;
+               (bool success,) = payable(owner).call{value: bal}("");
+               project.isActive[id] = false;
+               require(success);
+          }
+     }
 
-     /**
-      * function payProjectCreator(uint _projectid) external onlyOwner returns (bool sent) {
+     function payProjectCreator(uint _projectid) external onlyOwner returns (bool sent) {
           Project storage project = s_project[_projectid];
 
           if(!project.isActive[_projectid]) return NotActive();
@@ -426,6 +426,5 @@ contract GetFunded {
           }
           sent = true;
           require(sent);
-     }*
-     **/
+     }
 }
